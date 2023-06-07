@@ -69,6 +69,30 @@ namespace XIVLauncher.Common.Dalamud
                     // ignored
                 }
 
+                if (Path.GetFileName(entry.FileName) == "cheatplugin.json")
+                {
+                    try
+                    {
+                        File.WriteAllText(filePath, "[]");
+                        Log.Information("[DASSET] {0} cleared", entry.FileName);
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Error(ex, "[DASSET] {0} clearing failed", entry.FileName);
+                    }
+ 
+                    try
+                    {
+                        File.WriteAllText(filePathDev, "[]");
+                    }
+                    catch
+                    {
+                        // ignored
+                    }
+
+                    continue;
+                }
+
                 var refreshFile = false;
 
                 if (File.Exists(filePath) && !string.IsNullOrEmpty(entry.Hash))
