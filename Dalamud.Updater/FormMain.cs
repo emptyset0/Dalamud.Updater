@@ -306,6 +306,10 @@ namespace Dalamud.Updater
             {
                 this.injectDelaySeconds = double.Parse(tempInjectDelaySeconds);
             }
+            if (GetAppSettings("FirstHideHint", "true") == "false")
+            {
+                this.firstHideHint = false;
+            }
         }
 
         private void InitializeDeleteShit()
