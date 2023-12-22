@@ -13,6 +13,9 @@ using System.Windows;
 using Dalamud.Updater;
 using Newtonsoft.Json;
 using Serilog;
+using SharpCompress.Archives.SevenZip;
+using SharpCompress.Common;
+using SharpCompress.Readers;
 //using XIVLauncher.Common.PlatformAbstractions;
 using XIVLauncher.Common.Util;
 
@@ -49,6 +52,7 @@ namespace XIVLauncher.Common.Dalamud
         public const string REMOTE_DOTNET = REMOTE_BASE + "Dalamud/Release/Runtime/DotNet/{0}";
         public const string REMOTE_DESKTOP = REMOTE_BASE + "Dalamud/Release/Runtime/WindowsDesktop/{0}";
         private readonly TimeSpan defaultTimeout = TimeSpan.FromMinutes(25);
+        private static string onlineHash = string.Empty;
 
         private DownloadState _state;
         public DownloadState State
@@ -214,6 +218,8 @@ namespace XIVLauncher.Common.Dalamud
 
             var versionInfoJson = JsonConvert.SerializeObject(remoteVersionInfo);
 
+            onlineHash = remoteVersionInfo.Hash;
+
             var addonPath = new DirectoryInfo(Path.Combine(this.addonDirectory.FullName, "Hooks"));
             var currentVersionPath = new DirectoryInfo(Path.Combine(addonPath.FullName, remoteVersionInfo.AssemblyVersion));
             var runtimePaths = new DirectoryInfo[]
@@ -342,6 +348,20 @@ namespace XIVLauncher.Common.Dalamud
                     return false;
                 }
 
+                if (!string.IsNullOrEmpty(onlineHash))
+                {
+                    using var stream = File.OpenRead(hashesPath);
+                    using var md5 = MD5.Create();
+
+                    var hashHash = BitConverter.ToString(md5.ComputeHash(stream)).ToUpperInvariant().Replace("-", string.Empty);
+
+                    if (onlineHash != hashHash)
+                    {
+                        Log.Error("[UPDATE] hashes.json Hash Check Failed");
+                        return false;
+                    }
+                }
+
                 var hashes = JsonConvert.DeserializeObject<Dictionary<string, string>>(File.ReadAllText(hashesPath));
 
                 foreach (var hash in hashes)
@@ -418,8 +438,27 @@ namespace XIVLauncher.Common.Dalamud
                 File.Delete(downloadPath);
 
             await this.DownloadFile(version.DownloadUrl, downloadPath, this.defaultTimeout).ConfigureAwait(false);
-            SystemHelper.Un7za(downloadPath, addonPath.FullName);
-            //ZipFile.ExtractToDirectory(downloadPath, addonPath.FullName);
+
+            if (version.DownloadUrl.EndsWith("zip", StringComparison.OrdinalIgnoreCase))
+            {
+                ZipFile.ExtractToDirectory(downloadPath, addonPath.FullName);
+            }
+            else if (version.DownloadUrl.EndsWith("7z", StringComparison.OrdinalIgnoreCase))
+            {
+                using (var archive = SevenZipArchive.Open(downloadPath))
+                {
+                    var reader = archive.ExtractAllEntries();
+                    while (reader.MoveToNextEntry())
+                    {
+                        if (!reader.Entry.IsDirectory)
+                            reader.WriteEntryToDirectory(addonPath.FullName, new ExtractionOptions() { ExtractFullPath = true, Overwrite = true });
+                    }
+                }
+            }
+            else
+            {
+                Log.Error("[DUPDATE] Unsupported file.");
+            }
 
             File.Delete(downloadPath);
 

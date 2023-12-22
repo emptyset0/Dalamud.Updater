@@ -1,48 +1,40 @@
 using AutoUpdaterDotNET;
-using Dalamud.Updater.Properties;
 using Newtonsoft.Json;
+using Serilog;
+using Serilog.Core;
+using Serilog.Events;
 using System;
 using System.Collections.Generic;
-using System.ComponentModel;
 using System.Data;
 using System.Diagnostics;
-using System.Drawing;
 using System.IO;
 using System.Linq;
-using System.Net;
 using System.Reflection;
-using System.Text;
-using System.Threading;
-using System.Threading.Tasks;
-using System.Windows.Forms;
 using System.Text.RegularExpressions;
-using System.IO.Compression;
-using System.Configuration;
-using Newtonsoft.Json.Linq;
-using System.Security.Principal;
-using System.Xml;
+using System.Threading;
+using System.Windows.Forms;
 using XIVLauncher.Common.Dalamud;
-using Serilog.Core;
-using Serilog;
-using Serilog.Events;
 
 namespace Dalamud.Updater
 {
     public partial class FormMain : Form
     {
-        private string updateUrl = "https://dalamud-1253720819.cos.ap-nanjing.myqcloud.com/updater.xml";
+        private const string UPDATEURL = "https://aonyx.ffxiv.wang/Updater/Release/VersionInfo";
+        private const string OTTERHOME = """
+            如需帮助或者反馈,请前往:
+            https://file.bluefissure.com/FFXIV/Dalamud
+            https://github.com/ottercorp/Dalamud.Updater
+            https://aonyx.ffxiv.wang/
+            QQ频道:https://pd.qq.com/s/9ehyfcha3
+            QQ频道:https://pd.ottercorp.net
+            """;
 
         // private List<string> pidList = new List<string>();
-        private bool firstHideHint = true;
+        private bool firstHideHint = false;
         private bool isThreadRunning = true;
         private bool dotnetDownloadFinished = false;
         private bool desktopDownloadFinished = false;
-        //private string dotnetDownloadPath;
-        //private string desktopDownloadPath;
-        //private DirectoryInfo runtimePath;
-        //private DirectoryInfo[] runtimePaths;
-        //private string RuntimeVersion = "5.0.17";
-        private double injectDelaySeconds = 0;
+        private Config config;
         private DalamudLoadingOverlay dalamudLoadingOverlay;
 
         private readonly DirectoryInfo addonDirectory;
@@ -54,71 +46,6 @@ namespace Dalamud.Updater
         private readonly DalamudUpdater dalamudUpdater;
 
         public string windowsTitle = "獭纪委 v" + Assembly.GetExecutingAssembly().GetName().Version;
-        #region Oversea Accelerate Helper
-        private bool RemoteFileExists(string url)
-        {
-            try
-            {
-                HttpWebRequest request = WebRequest.Create(url) as HttpWebRequest;
-                request.Method = "HEAD";
-                HttpWebResponse response = request.GetResponse() as HttpWebResponse;
-                response.Close();
-                return (response.StatusCode == HttpStatusCode.OK);
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
-        private string GetProperUrl(string url)
-        {
-            if (RemoteFileExists(url))
-                return url;
-            var accUrl = url.Replace("/updater.xml", "/acce_updater.xml").Replace("ap-nanjing", "accelerate");
-            return accUrl;
-        }
-
-        #endregion
-
-        public static string GetAppSettings(string key, string def = null)
-        {
-            try
-            {
-                var configFile = ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.None);
-                var settings = configFile.AppSettings.Settings;
-                var ele = settings[key];
-                if (ele == null) return def;
-                return ele.Value;
-            }
-            catch (ConfigurationErrorsException)
-            {
-                Console.WriteLine("Error reading app settings");
-            }
-            return def;
-        }
-        public static void AddOrUpdateAppSettings(string key, string value)
-        {
-            try
-            {
-                var configFile = ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.None);
-                var settings = configFile.AppSettings.Settings;
-                if (settings[key] == null)
-                {
-                    settings.Add(key, value);
-                }
-                else
-                {
-                    settings[key].Value = value;
-                }
-                configFile.Save(ConfigurationSaveMode.Modified);
-                ConfigurationManager.RefreshSection(configFile.AppSettings.SectionInformation.Name);
-            }
-            catch (ConfigurationErrorsException)
-            {
-                Console.WriteLine("Error writing app settings");
-            }
-        }
 
         private int checkTimes = 0;
 
@@ -148,8 +75,8 @@ namespace Dalamud.Updater
         private string getVersion()
         {
             var rgx = new Regex(@"^\d+\.\d+\.\d+\.\d+$");
-            var stgRgx = new Regex(@"^[\da-zA-Z]{7}$");
-            var di = new DirectoryInfo(Path.Combine(Directory.GetParent(Assembly.GetExecutingAssembly().Location).FullName, "addon", "Hooks"));
+            var stgRgx = new Regex(@"^[\da-zA-Z]{8}$");
+            var di = new DirectoryInfo(Path.Combine(addonDirectory.FullName, "Hooks"));
             var version = new Version("0.0.0.0");
             if (!di.Exists)
                 return version.ToString();
@@ -182,20 +109,17 @@ namespace Dalamud.Updater
             InitializeComponent();
             InitializePIDCheck();
             InitializeDeleteShit();
-            InitializeConfig();
             addonDirectory = Directory.GetParent(Assembly.GetExecutingAssembly().Location);
             dalamudLoadingOverlay = new DalamudLoadingOverlay(this);
             dalamudLoadingOverlay.OnProgressBar += setProgressBar;
             dalamudLoadingOverlay.OnSetVisible += setVisible;
             dalamudLoadingOverlay.OnStatusLabel += setStatus;
-            addonDirectory = new DirectoryInfo(Path.Combine(Directory.GetParent(Assembly.GetExecutingAssembly().Location).FullName, "addon"));
-            runtimeDirectory = new DirectoryInfo(Path.Combine(Directory.GetParent(Assembly.GetExecutingAssembly().Location).FullName, "runtime"));
+            addonDirectory = new DirectoryInfo(Path.Combine(Directory.GetParent(Assembly.GetExecutingAssembly().Location).FullName, "XIVLauncher", "addon"));
+            runtimeDirectory = new DirectoryInfo(Path.Combine(Directory.GetParent(Assembly.GetExecutingAssembly().Location).FullName, "XIVLauncher", "runtime"));
             xivlauncherDirectory = new DirectoryInfo(Path.Combine(Directory.GetParent(Assembly.GetExecutingAssembly().Location).FullName, "XIVLauncher"));
             assetDirectory = new DirectoryInfo(Path.Combine(Directory.GetParent(Assembly.GetExecutingAssembly().Location).FullName, "XIVLauncher", "dalamudAssets"));
             configDirectory = new DirectoryInfo(Path.Combine(Directory.GetParent(Assembly.GetExecutingAssembly().Location).FullName, "XIVLauncher"));
             //labelVersion.Text = string.Format("卫月版本 : {0}", getVersion());
-            delayBox.Value = (decimal)this.injectDelaySeconds;
-            SetDalamudVersion();
             string[] strArgs = Environment.GetCommandLineArgs();
             if (strArgs.Length >= 2 && strArgs[1].Equals("-startup"))
             {
@@ -207,29 +131,17 @@ namespace Dalamud.Updater
                     this.DalamudUpdaterIcon.ShowBalloonTip(2000, "自启动成功", "放心，我会在后台偷偷干活的。", ToolTipIcon.Info);
                 }
             }
-            try
-            {
-                var localVersion = Assembly.GetExecutingAssembly().GetName().Version;
-                var remoteUrl = GetProperUrl(updateUrl);
-                XmlDocument remoteXml = new XmlDocument();
-                remoteXml.Load(remoteUrl);
-                foreach (XmlNode child in remoteXml.SelectNodes("/item/version"))
-                {
-                    if (child.InnerText != localVersion.ToString())
-                    {
-                        AutoUpdater.Start(remoteUrl);
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show(ex.Message, "程序启动版本检查失败",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Error);
-            }
             dalamudUpdater = new DalamudUpdater(addonDirectory, runtimeDirectory, assetDirectory, configDirectory);
             dalamudUpdater.Overlay = dalamudLoadingOverlay;
             dalamudUpdater.OnUpdateEvent += DalamudUpdater_OnUpdateEvent;
+            InitializeConfig();
+            labelVer.Text = $"v{Assembly.GetExecutingAssembly().GetName().Version}";
+            UpdateFormConfig();
+            UpdateSelf();
+
+            SetDalamudVersion();
+
+            CheckUpdate();
         }
 
         private void DalamudUpdater_OnUpdateEvent(DalamudUpdater.DownloadState value)
@@ -293,27 +205,17 @@ namespace Dalamud.Updater
         }
         private void InitializeConfig()
         {
-            if (GetAppSettings("AutoInject", "false") == "true")
-            {
-                this.checkBoxAutoInject.Checked = true;
-            }
-            if (GetAppSettings("AutoStart", "false") == "true")
-            {
-                this.checkBoxAutoStart.Checked = true;
-            }
-            var tempInjectDelaySeconds = GetAppSettings("InjectDelaySeconds", "0");
-            if (tempInjectDelaySeconds != "0")
-            {
-                this.injectDelaySeconds = double.Parse(tempInjectDelaySeconds);
-            }
-            if (GetAppSettings("FirstHideHint", "true") == "false")
-            {
-                this.firstHideHint = false;
-            }
+            this.config = Config.Load(Path.Combine(Directory.GetParent(Assembly.GetExecutingAssembly().Location).FullName, "DalamudUpdaterConfig.json"));
         }
 
         private void InitializeDeleteShit()
         {
+            var shitConfig = Path.Combine(Directory.GetCurrentDirectory(), "Dalamud.Updater.exe.config");
+            if (File.Exists(shitConfig))
+            {
+                File.Delete(shitConfig);
+            }
+
             var shitInjector = Path.Combine(Directory.GetCurrentDirectory(), "Dalamud.Injector.exe");
             if (File.Exists(shitInjector))
             {
@@ -332,7 +234,13 @@ namespace Dalamud.Updater
                 Directory.Delete(shitUIRes, true);
             }
 
-            var shitRuntime = Path.Combine(Directory.GetCurrentDirectory(), "XIVLauncher", "runtime");
+            var shitAddon = Path.Combine(Directory.GetCurrentDirectory(), "addon");
+            if (Directory.Exists(shitAddon))
+            {
+                Directory.Delete(shitAddon, true);
+            }
+
+            var shitRuntime = Path.Combine(Directory.GetCurrentDirectory(), "runtime");
             if (Directory.Exists(shitRuntime))
             {
                 Directory.Delete(shitRuntime, true);
@@ -347,9 +255,16 @@ namespace Dalamud.Updater
                 {
                     try
                     {
-                        var newPidList = Process.GetProcessesByName("ffxiv_dx11").Where(process =>
+                        //var newPidList = Process.GetProcessesByName("ffxiv_dx11").Where(process =>
+                        //{
+                        //    return !process.MainWindowTitle.Contains("FINAL FANTASY XIV");
+                        //}).ToList().ConvertAll(process => process.Id.ToString()).ToArray();
+                        //为什么我开了FF检测不到啊.jpg
+                        var newPidList = Process.GetProcesses().Where(process =>
                         {
-                            return !process.MainWindowTitle.Contains("FINAL FANTASY XIV");
+                            var isFfxivProcess = process.ProcessName == "ffxiv_dx11" || process.ProcessName == "ffxiv";
+                            var isSdoClient = !process.MainWindowTitle.Contains("FINAL FANTASY XIV");
+                            return isFfxivProcess && isSdoClient;
                         }).ToList().ConvertAll(process => process.Id.ToString()).ToArray();
                         var newHash = String.Join(", ", newPidList).GetHashCode();
                         var oldPidList = this.comboBoxFFXIV.Items.Cast<Object>().Select(item => item.ToString()).ToArray();
@@ -371,7 +286,13 @@ namespace Dalamud.Updater
                                         {
                                             //Thread.Sleep((int)(this.injectDelaySeconds * 1000));
                                             var pid = int.Parse(pidStr);
-                                            if (this.Inject(pid, (int)this.injectDelaySeconds * 1000))
+                                            if (Process.GetProcessById(pid).ProcessName != "ffxiv_dx11")
+                                            {
+                                                this.DalamudUpdaterIcon.ShowBalloonTip(2000, "找不到游戏", $"进程{pid}不是dx11版FF。", ToolTipIcon.Warning);
+                                                Log.Information("{pid} is not dx11", pid);
+                                                continue;
+                                            }
+                                            if (this.Inject(pid, (int)(this.config.InjectDelaySeconds * 1000)))
                                             {
                                                 this.DalamudUpdaterIcon.ShowBalloonTip(2000, "帮你注入了", $"帮你注入了进程{pid}，不用谢。", ToolTipIcon.Info);
                                             }
@@ -395,12 +316,102 @@ namespace Dalamud.Updater
         #endregion
         private void FormMain_Load(object sender, EventArgs e)
         {
-            AutoUpdater.ApplicationExitEvent += AutoUpdater_ApplicationExitEvent;
-            AutoUpdater.CheckForUpdateEvent += AutoUpdaterOnCheckForUpdateEvent;
-            AutoUpdater.InstalledVersion = GetUpdaterVersion();
-            labelVer.Text = $"v{Assembly.GetExecutingAssembly().GetName().Version}";
-            CheckUpdate();
         }
+
+        private void UpdateFormConfig()
+        {
+            this.checkBoxAutoInject.Checked = this.config.AutoInject.Value;
+            this.checkBoxAutoStart.Checked = this.config.AutoStart.Value;
+            this.delayBox.Value = (decimal)this.config.InjectDelaySeconds;
+            this.checkBoxSafeMode.Checked = this.config.SafeMode.Value;
+        }
+
+        private void UpdateSelf()
+        {
+            AutoUpdater.ApplicationExitEvent += () =>
+            {
+                this.Text = @"Closing application...";
+                Thread.Sleep(5000);
+                this.Dispose();
+                this.DalamudUpdaterIcon.Dispose();
+                Application.Exit();
+            };
+            //AutoUpdater.CheckForUpdateEvent += AutoUpdaterOnCheckForUpdateEvent;
+            AutoUpdater.InstalledVersion = GetUpdaterVersion();
+            AutoUpdater.ShowRemindLaterButton = false;
+            AutoUpdater.ShowSkipButton = false;
+            AutoUpdater.UpdateMode = Mode.Normal;
+            try
+            {
+                AutoUpdater.ParseUpdateInfoEvent += (args) =>
+                {
+                    try
+                    {
+#if DEBUG
+                        var json = JsonConvert.DeserializeObject<VersionInfo>(File.ReadAllText(@"D:\Code\ottercorp\version.txt"), new JsonSerializerSettings
+                        {
+                            TypeNameHandling = TypeNameHandling.All,
+                            TypeNameAssemblyFormatHandling = TypeNameAssemblyFormatHandling.Simple,
+                            Formatting = Formatting.Indented,
+                            NullValueHandling = NullValueHandling.Ignore,
+
+                        });
+#else
+                        var json = JsonConvert.DeserializeObject<VersionInfo>(args.RemoteData, new JsonSerializerSettings
+                        {
+                            TypeNameHandling = TypeNameHandling.All,
+                            TypeNameAssemblyFormatHandling = TypeNameAssemblyFormatHandling.Simple,
+                            Formatting = Formatting.Indented,
+                            NullValueHandling = NullValueHandling.Ignore,
+                        });
+#endif
+                        if (json.Version == null || json.DownloadUrl == null)
+                        {
+                            throw new Exception($"远程版本配置文件错误:\n {args.RemoteData}");
+                        }
+
+                        json.ChangeLog ??= "https://bbs.tggfl.com/topic/32/dalamud-%E5%8D%AB%E6%9C%88%E6%A1%86%E6%9E%B6";
+                        args.UpdateInfo = new UpdateInfoEventArgs
+                        {
+                            CurrentVersion = json.Version,
+                            ChangelogURL = json.ChangeLog,
+                            DownloadURL = json.DownloadUrl,
+                        };
+                        if (json.Config != null && this.config != null)
+                        {
+                            var type = typeof(Config);
+                            foreach (var property in type.GetProperties())
+                            {
+                                //if (property.Name.Equals())
+                                var remoteValue = property.GetValue(json.Config, null);
+                                if (remoteValue != null)
+                                {
+                                    property.SetValue(this.config, remoteValue);
+                                    Log.Information($"Change config {property.Name} value: {property.GetValue(this.config)} -> {remoteValue}");
+                                }
+                            }
+                            this.checkBoxSafeMode.Invoke(UpdateFormConfig);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show($"{ex.Message}\n{OTTERHOME}", "程序启动版本检查失败",
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Error);
+                    }
+                };
+                //AutoUpdater.ShowUpdateForm();
+                AutoUpdater.Start(UPDATEURL);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"{ex.Message}\n{OTTERHOME}", "程序启动版本检查失败",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+            }
+        }
+
+
         private void FormMain_Disposed(object sender, EventArgs e)
         {
             this.isThreadRunning = false;
@@ -452,113 +463,6 @@ namespace Dalamud.Updater
             //this.Close();
             this.DalamudUpdaterIcon.Dispose();
             Application.Exit();
-        }
-
-        private void AutoUpdater_ApplicationExitEvent()
-        {
-            Text = @"Closing application...";
-            Thread.Sleep(5000);
-            Application.Exit();
-        }
-
-
-        private void AutoUpdaterOnParseUpdateInfoEvent(ParseUpdateInfoEventArgs args)
-        {
-            dynamic json = JsonConvert.DeserializeObject(args.RemoteData);
-            args.UpdateInfo = new UpdateInfoEventArgs
-            {
-                CurrentVersion = json.version,
-                ChangelogURL = json.changelog,
-                DownloadURL = json.url,
-                Mandatory = new Mandatory
-                {
-                    Value = json.mandatory.value,
-                    UpdateMode = json.mandatory.mode,
-                    MinimumVersion = json.mandatory.minVersion
-                },
-                CheckSum = new CheckSum
-                {
-                    Value = json.checksum.value,
-                    HashingAlgorithm = json.checksum.hashingAlgorithm
-                }
-            };
-        }
-
-        private void OnCheckForUpdateEvent(UpdateInfoEventArgs args)
-        {
-            if (args.Error == null)
-            {
-                if (args.IsUpdateAvailable)
-                {
-                    DialogResult dialogResult;
-                    if (args.Mandatory.Value)
-                    {
-                        dialogResult =
-                            MessageBox.Show(
-                                $@"卫月更新器 {args.CurrentVersion} 版本可用。当前版本为 {args.InstalledVersion}。这是一个强制更新，请点击确认来更新卫月更新器。",
-                                @"更新可用",
-                                MessageBoxButtons.OK,
-                                MessageBoxIcon.Information);
-                    }
-                    else
-                    {
-                        dialogResult =
-                            MessageBox.Show(
-                                $@"卫月更新器 {args.CurrentVersion} 版本可用。当前版本为 {args.InstalledVersion}。您想要开始更新吗？", @"更新可用",
-                                MessageBoxButtons.YesNo,
-                                MessageBoxIcon.Information);
-                    }
-
-
-                    if (dialogResult.Equals(DialogResult.Yes) || dialogResult.Equals(DialogResult.OK))
-                    {
-                        try
-                        {
-                            //You can use Download Update dialog used by AutoUpdater.NET to download the update.
-
-                            if (AutoUpdater.DownloadUpdate(args))
-                            {
-                                this.Dispose();
-                                this.DalamudUpdaterIcon.Dispose();
-                                Application.Exit();
-                            }
-                        }
-                        catch (Exception exception)
-                        {
-                            MessageBox.Show(exception.Message, exception.GetType().ToString(), MessageBoxButtons.OK,
-                                MessageBoxIcon.Error);
-                        }
-                    }
-                }
-                else
-                {
-                    Log.Information("[Updater] 没有可用的卫月更新器更新，请稍后查看。");
-                    /*
-                    MessageBox.Show(@"没有可用的更新器更新，请稍后查看。", @"更新不可用",
-                                   MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    */
-                }
-            }
-            else
-            {
-                if (args.Error is WebException)
-                {
-                    MessageBox.Show(
-                        @"访问更新服务器出错，请检查您的互联网连接后重试。",
-                        @"更新检查失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                }
-                else
-                {
-                    MessageBox.Show(args.Error.Message,
-                        args.Error.GetType().ToString(), MessageBoxButtons.OK,
-                        MessageBoxIcon.Error);
-                }
-            }
-        }
-
-        private void AutoUpdaterOnCheckForUpdateEvent(UpdateInfoEventArgs args)
-        {
-            OnCheckForUpdateEvent(args);
         }
 
         private void ButtonCheckForUpdate_Click(object sender, EventArgs e)
@@ -656,9 +560,46 @@ namespace Dalamud.Updater
             }
         }
 
+        private bool IsZombieProcess(int pid)
+        {
+            try
+            {
+                var process = Process.GetProcessById(pid);
+                var mainModule = process.MainModule;
+                var handle = SystemHelper.OpenProcess(0x001F0FFF, true, process.Id);
+                if (handle == IntPtr.Zero)
+                    throw new Exception("ERROR: OpenProcess()");
+                SystemHelper.CloseHandle(handle);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("""
+                    无法访问/打开进程
+                    1.请检查安全软件，将Dalamud程序以及相关目录加入白名单
+                    2.打开任务管理器，检查是否存在未完全退出且无响应的FFXIV进程,并尝试结束
+                    3.尝试重启电脑
+
+                    """ + ex.Message, windowsTitle, MessageBoxButtons.YesNo);
+                return true;
+            }
+            return false;
+        }
+
         private bool Inject(int pid, int injectDelay = 0)
         {
             var process = Process.GetProcessById(pid);
+            if (process.ProcessName != "ffxiv_dx11")
+            {
+                Log.Error("{pid} is not dx11", pid);
+                if (MessageBox.Show("此进程并非dx11版FFXIV,无法使用Dalamud。\n解决方法:\n点击确定使用浏览器查看 https://www.yuque.com/ffcafe/act/dx11", windowsTitle, MessageBoxButtons.YesNo) != DialogResult.Yes)
+                {
+                    Process.Start("https://www.yuque.com/ffcafe/act/dx11");
+                    return false;
+                }
+            }
+            if (IsZombieProcess(pid)) {
+                return false;
+            }
             if (isInjected(process))
             {
                 return false;
@@ -685,7 +626,7 @@ namespace Dalamud.Updater
             if (string.IsNullOrWhiteSpace(prevDalamudRuntime))
                 environment.Add("DALAMUD_RUNTIME", runtimeDirectory.FullName);
             */
-            WindowsDalamudRunner.Inject(dalamudUpdater.Runner, process.Id, environment, DalamudLoadMethod.DllInject, dalamudStartInfo);
+            WindowsDalamudRunner.Inject(dalamudUpdater.Runner, process.Id, environment, DalamudLoadMethod.DllInject, dalamudStartInfo, this.safeMode);
             return true;
         }
 
@@ -717,12 +658,12 @@ namespace Dalamud.Updater
             }
 
         }
-        private void SetAutoRun()
+        private void SetAutoRun(bool value)
         {
             string strFilePath = Application.ExecutablePath;
             try
             {
-                SystemHelper.SetAutoRun($"\"{strFilePath}\"" + " -startup", "DalamudAutoInjector", checkBoxAutoStart.Checked);
+                SystemHelper.SetAutoRun($"\"{strFilePath}\"" + " -startup", "DalamudAutoInjector", value);
             }
             catch (Exception ex)
             {
@@ -732,19 +673,21 @@ namespace Dalamud.Updater
 
         private void checkBoxAutoStart_CheckedChanged(object sender, EventArgs e)
         {
-            SetAutoRun();
-            AddOrUpdateAppSettings("AutoStart", checkBoxAutoStart.Checked ? "true" : "false");
+            this.config.AutoStart = checkBoxAutoStart.Checked;
+            SetAutoRun(this.config.AutoStart.Value);
+            this.config.Save();
         }
 
         private void checkBoxAutoInject_CheckedChanged(object sender, EventArgs e)
         {
-            AddOrUpdateAppSettings("AutoInject", checkBoxAutoInject.Checked ? "true" : "false");
+            this.config.AutoInject = checkBoxAutoInject.Checked;
+            this.config.Save();
         }
 
         private void delayBox_ValueChanged(object sender, EventArgs e)
         {
-            this.injectDelaySeconds = (double)delayBox.Value;
-            AddOrUpdateAppSettings("InjectDelaySeconds", this.injectDelaySeconds.ToString());
+            this.config.InjectDelaySeconds = (double)delayBox.Value;
+            this.config.Save();
         }
 
         private void setProgressBar(int v)
@@ -787,6 +730,12 @@ namespace Dalamud.Updater
                 toolStripProgressBar1.Visible = v;
                 //toolStripStatusLabel1.Visible = v;
             }
+        }
+
+        private bool safeMode = false;
+        private void checkBox1_CheckedChanged(object sender, EventArgs e)
+        {
+            this.safeMode = this.checkBoxSafeMode.Checked;
         }
     }
 }

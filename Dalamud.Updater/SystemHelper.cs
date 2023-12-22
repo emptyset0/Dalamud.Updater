@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Security;
 using Dalamud.Updater.Properties;
 using Microsoft.Win32;
 
@@ -73,41 +74,12 @@ namespace Dalamud.Updater
                 throw new Exception(ex.Message, ex);
             }
         }
+        [SuppressUnmanagedCodeSecurity]
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern IntPtr OpenProcess(uint dwDesiredAccess, bool bInheritHandle, int processId);
 
-        public static void Un7za(string path, string output)
-        {
-            string tempExeName = Path.Combine(Directory.GetCurrentDirectory(), "7za.exe");
-            if (File.Exists(tempExeName)) File.Delete(tempExeName);
-            using (FileStream fsDst = new FileStream(tempExeName, FileMode.CreateNew, FileAccess.Write))
-            {
-                byte[] bytes = Resources._7za_exe;
-
-                fsDst.Write(bytes, 0, bytes.Length);
-            }
-
-            var sevenzaPath = Path.Combine(Directory.GetCurrentDirectory(), "7za.exe");
-
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
-            {
-                sevenzaPath = "7za";
-            }
-
-            var psi = new ProcessStartInfo(sevenzaPath)
-            {
-                Arguments = $"x -y \"{path}\" -o\"{output}\"",
-                RedirectStandardOutput = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
-
-            var tarProcess = Process.Start(psi);
-            var outputLines = tarProcess.StandardOutput.ReadToEnd();
-            if (tarProcess == null)
-                throw new BadImageFormatException("Could not start 7za.");
-
-            tarProcess.WaitForExit();
-            if (tarProcess.ExitCode != 0)
-                throw new FormatException($"Could not un7z.\n{outputLines}");
-        }
+        [SuppressUnmanagedCodeSecurity]
+        [DllImport("kernel32.dll")]
+        public static extern int CloseHandle(IntPtr hObject);
     }
 }

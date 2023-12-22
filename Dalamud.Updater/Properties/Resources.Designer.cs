@@ -61,32 +61,12 @@ namespace Dalamud.Updater.Properties {
         }
         
         /// <summary>
-        ///   查找 System.Byte[] 类型的本地化资源。
-        /// </summary>
-        internal static byte[] _7za_exe {
-            get {
-                object obj = ResourceManager.GetObject("7za.exe", resourceCulture);
-                return ((byte[])(obj));
-            }
-        }
-        
-        /// <summary>
         ///   查找类似于 (图标) 的 System.Drawing.Icon 类型的本地化资源。
         /// </summary>
         internal static System.Drawing.Icon dalamud {
             get {
                 object obj = ResourceManager.GetObject("dalamud", resourceCulture);
                 return ((System.Drawing.Icon)(obj));
-            }
-        }
-        
-        /// <summary>
-        ///   查找 System.Byte[] 类型的本地化资源。
-        /// </summary>
-        internal static byte[] License {
-            get {
-                object obj = ResourceManager.GetObject("License", resourceCulture);
-                return ((byte[])(obj));
             }
         }
     }
